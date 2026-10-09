@@ -363,13 +363,14 @@ const clientExports = definition.factory((name) => {
 })
 check(typeof clientExports.apply === 'function', 'client half exports apply')
 check(Array.isArray(clientExports.inject) && clientExports.inject.includes('slots'), 'client half injects slots')
+check(Array.isArray(clientExports.inject) && clientExports.inject.includes('remote.credentials'), 'client half declares the remote.credentials inject edge')
 
 let registration
 const slots = {
   inject(name, callback) { callback() },
   register(options, Component) { registration = { options, Component }; return () => undefined },
 }
-clientExports.apply({ get: (name) => (name === 'slots' ? slots : undefined) })
+clientExports.apply({ get: (name) => (name === 'slots' ? slots : undefined), remote: { credentials: undefined } })
 check(registration !== undefined, 'client registers one slot contribution')
 check(registration.options.name === 'settings.section', 'contribution targets settings.section')
 check(registration.options.id === 'ollama-quota', 'contribution uses its own section id')
@@ -484,22 +485,25 @@ let credentialView = {
 }
 const remoteFake = {
   credentials: {
-    describe(payload) {
-      credentialCalls.describe.push(payload)
+    // Current Remote form: one array argument, `{ok, value}` result.
+    describe(refs) {
+      credentialCalls.describe.push({ refs })
       const credentials = {}
-      for (const ref of payload.refs) credentials[ref] = credentialView[ref] || { configured: false, writable: true }
-      return Promise.resolve({ result: { ok: true, value: { credentials } } })
+      for (const ref of refs) credentials[ref] = credentialView[ref] || { configured: false, writable: true }
+      return Promise.resolve({ ok: true, value: credentials })
     },
-    set(payload) {
-      credentialCalls.set.push(payload)
-      credentialView = Object.assign({}, credentialView, { [payload.ref]: { configured: true, source: 'file', writable: true } })
-      return Promise.resolve({ result: { ok: true, value: {} } })
+    set(ref, value) {
+      credentialCalls.set.push({ ref, value })
+      credentialView = Object.assign({}, credentialView, { [ref]: { configured: true, source: 'file', writable: true } })
+      return Promise.resolve({ ok: true, value: undefined })
     },
-    unset(payload) {
-      credentialCalls.unset.push(payload)
-      credentialView = Object.assign({}, credentialView, { [payload.ref]: { configured: false, writable: true } })
-      return Promise.resolve({ result: { ok: true, value: {} } })
+    unset(ref) {
+      credentialCalls.unset.push({ ref })
+      credentialView = Object.assign({}, credentialView, { [ref]: { configured: false, writable: true } })
+      return Promise.resolve({ ok: true, value: undefined })
     },
+    // Shape guard: the old object-argument form must never reach this face.
+    bogus() { throw new Error('bogus') },
   },
 }
 let remoteRegistration
@@ -513,6 +517,7 @@ clientExports.apply({
     }
     return name === 'remote' ? remoteFake : undefined
   },
+  remote: remoteFake,
 })
 
 const mounted = await renderComponent(remoteRegistration.Component, loadedSnapshot, true)
@@ -565,6 +570,7 @@ clientExports.apply({
   get: (name) => (name === 'slots'
     ? { inject: (slot, callback) => callback(), register: (options, Component) => { localeRegistration = { options, Component }; return () => undefined } }
     : name === 'locale' ? localeFake : undefined),
+  remote: { credentials: undefined },
   effect: (callback) => { callback(); return () => undefined },
 })
 check(localeRegistrations.length === 3, 'client registers Japanese, Chinese, and English dictionaries when the locale service exists')

@@ -188,8 +188,8 @@ window.__ModuleLoader__.load({
     const browserIsZh = typeof navigator !== 'undefined' && /^zh/i.test(navigator.language || '')
     const browserIsJa = typeof navigator !== 'undefined' && /^ja/i.test(navigator.language || '')
     let t = browserIsZh ? localTranslate(zh) : browserIsJa ? localTranslate(ja) : localTranslate(en)
-    /** Client Remote service; undefined when this client has no credential face. */
-    let remote
+    /** Client Remote `credentials` namespace; undefined when the client has no credential face. */
+    let credentials
 
     const CSS_ID = 'dsh-ollama-quota/css'
     if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css="' + CSS_ID + '"]') === null) {
@@ -544,26 +544,31 @@ window.__ModuleLoader__.load({
       }, [])
 
       const refreshKey = React.useCallback((refsList) => {
-        if (remote === undefined || !Array.isArray(refsList) || refsList.length === 0) {
-          setKeyState({ status: remote === undefined ? 'unavailable' : 'idle', refs: {}, refsList: refsList || [], error: null })
+        if (credentials === undefined || !Array.isArray(refsList) || refsList.length === 0) {
+          setKeyState({ status: credentials === undefined ? 'unavailable' : 'idle', refs: {}, refsList: refsList || [], error: null })
           return
         }
         setKeyState({ status: 'loading', refs: {}, refsList, error: null })
-        remote.credentials.describe({ refs: refsList }).then((response) => {
-          const result = response && response.result
-          if (result && result.ok) {
-            setKeyState({
-              status: 'ready',
-              refs: result.value && result.value.credentials ? result.value.credentials : {},
-              refsList,
-              error: null,
-            })
-          } else {
-            setKeyState({ status: 'error', refs: {}, refsList, error: (result && result.error && result.error.message) || 'describe failed' })
-          }
-        }).catch((error) => {
-          setKeyState({ status: 'error', refs: {}, refsList, error: String((error && error.message) || error) })
-        })
+        // One microtask between render and the Remote call: a denied namespace
+        // accessor or a transport throw lands in the catch instead of escaping
+        // the effect (which would blank the whole section).
+        Promise.resolve()
+          .then(() => credentials.describe(refsList))
+          .then((response) => {
+            if (response && response.ok) {
+              setKeyState({ status: 'ready', refs: response.value || {}, refsList, error: null })
+            } else {
+              setKeyState({
+                status: 'error',
+                refs: {},
+                refsList,
+                error: (response && response.error && response.error.message) || 'describe failed',
+              })
+            }
+          })
+          .catch((error) => {
+            setKeyState({ status: 'error', refs: {}, refsList, error: String((error && error.message) || error) })
+          })
       }, [])
 
       React.useEffect(() => {
@@ -584,7 +589,7 @@ window.__ModuleLoader__.load({
       const editable = primaryInfo !== undefined && primaryInfo.writable === true
 
       const saveKey = () => {
-        if (remote === undefined || primaryRef === null || !editable) return
+        if (credentials === undefined || primaryRef === null || !editable) return
         const failure = keyFailure(draft)
         if (failure !== undefined) {
           setKeyError(failure)
@@ -594,39 +599,45 @@ window.__ModuleLoader__.load({
         setKeyBusy(true)
         setKeyError(null)
         setKeyMessage(null)
-        remote.credentials.set({ ref: primaryRef, value: draft.trim() }).then((response) => {
-          const result = response && response.result
-          if (result && result.ok) {
-            setDraft('')
-            setKeyMessage(t('keySaved'))
-            refreshKey(refsList)
-            load(true)
-          } else {
-            setKeyError((result && result.error && result.error.message) || t('unknown'))
-          }
-        }).catch((error) => {
-          setKeyError(String((error && error.message) || error))
-        }).finally(() => { setKeyBusy(false) })
+        Promise.resolve()
+          .then(() => credentials.set(primaryRef, draft.trim()))
+          .then((response) => {
+            if (response && response.ok) {
+              setDraft('')
+              setKeyMessage(t('keySaved'))
+              refreshKey(refsList)
+              load(true)
+            } else {
+              setKeyError((response && response.error && response.error.message) || t('unknown'))
+            }
+          })
+          .catch((error) => {
+            setKeyError(String((error && error.message) || error))
+          })
+          .finally(() => { setKeyBusy(false) })
       }
 
       const clearKey = () => {
-        if (remote === undefined || primaryRef === null || !editable) return
+        if (credentials === undefined || primaryRef === null || !editable) return
         setKeyBusy(true)
         setKeyError(null)
         setKeyMessage(null)
-        remote.credentials.unset({ ref: primaryRef }).then((response) => {
-          const result = response && response.result
-          if (result && result.ok) {
-            setDraft('')
-            setKeyMessage(t('keyCleared'))
-            refreshKey(refsList)
-            load(true)
-          } else {
-            setKeyError((result && result.error && result.error.message) || t('unknown'))
-          }
-        }).catch((error) => {
-          setKeyError(String((error && error.message) || error))
-        }).finally(() => { setKeyBusy(false) })
+        Promise.resolve()
+          .then(() => credentials.unset(primaryRef))
+          .then((response) => {
+            if (response && response.ok) {
+              setDraft('')
+              setKeyMessage(t('keyCleared'))
+              refreshKey(refsList)
+              load(true)
+            } else {
+              setKeyError((response && response.error && response.error.message) || t('unknown'))
+            }
+          })
+          .catch((error) => {
+            setKeyError(String((error && error.message) || error))
+          })
+          .finally(() => { setKeyBusy(false) })
       }
 
       const children = []
@@ -662,7 +673,7 @@ window.__ModuleLoader__.load({
       }
       children.push(React.createElement(ApiKeyCard, {
         key: 'apikey',
-        remoteAvailable: remote !== undefined,
+        remoteAvailable: credentials !== undefined,
         primaryRef,
         primaryInfo,
         editable,
@@ -701,8 +712,10 @@ window.__ModuleLoader__.load({
         ctx.effect(() => locale.register(LOCALE_NS, 'en', en), 'ollama-quota: English dictionary')
         t = locale.bind(LOCALE_NS)
       }
-      const remoteService = ctx.get('remote')
-      if (remoteService !== undefined) remote = remoteService
+      // `remote.credentials` is a declared inject edge: the Remote accessor
+      // refuses the namespace property, and its methods are the current
+      // positional form (describe(refs) / set(ref, value) / unset(ref)).
+      credentials = ctx.remote.credentials
       slots.inject('settings.section', () => slots.register({
         name: 'settings.section',
         id: 'ollama-quota',
@@ -712,7 +725,7 @@ window.__ModuleLoader__.load({
     }
 
     exports.apply = apply
-    exports.inject = ['slots']
+    exports.inject = ['slots', 'remote', 'remote.credentials']
     return module.exports
   },
 })

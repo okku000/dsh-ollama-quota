@@ -32,7 +32,7 @@ is re-read on its own slower interval (`usageRefreshMs`) because its wide window
 | Spend, requests, input/cached/output tokens | `usage.totals` over `usageRange` |
 | Daily spend strip | `usage.buckets[].usage_usd` (max 31 buckets) |
 | Key source | which credential reference resolved |
-| API key editor | `credentials.describe` / `credentials.set` / `credentials.unset` over the DSH Remote |
+| API key editor | `remote.credentials.describe(refs)` / `set(ref, value)` / `unset(ref)` over the DSH Remote (`remote.credentials` is a declared inject edge) |
 
 Per-model request counts are not shown: the endpoint stopped reporting them.
 

@@ -1,6 +1,6 @@
 {
   "name": "dsh-ollama-quota",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "DeepSeek Harness plugin: show the Ollama Cloud credit balance and recent usage as a Settings section, with an in-page API key editor.",
   "keywords": [
