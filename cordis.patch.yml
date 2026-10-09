@@ -1,0 +1,14 @@
+# Bundle patch for dsh-ollama-quota: one Host row mounts the balance poller
+# and its snapshot route; the same package's `./client` half renders the
+# Settings section (declared by `dsh.client` in package.json).
+#
+# Optional row config (every field has a default, see index.js):
+#   keyEnvs:     [OLLAMA_CLOUD_API_KEY, OLLAMA_API_KEY]
+#   apiBase:     https://ollama.com
+#   usageRange:  30d          # 24h | 7d | 30d
+#   refreshMs:   60000        # minimum 5000
+#   usageRefreshMs: 300000    # minimum 60000
+#   timeoutMs:   15000
+- insert:
+    - id: ollama-quota
+      name: 'dsh-ollama-quota'

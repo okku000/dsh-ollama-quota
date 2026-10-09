@@ -1,0 +1,62 @@
+{
+  "name": "dsh-ollama-quota",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "DeepSeek Harness plugin: show the Ollama Cloud credit balance and recent usage as a Settings section, with an in-page API key editor.",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "ollama",
+    "ollama-cloud",
+    "quota",
+    "credit",
+    "usage",
+    "api-key"
+  ],
+  "license": "MIT",
+  "author": "okku000",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/okku000/dsh-ollama-quota.git"
+  },
+  "homepage": "https://github.com/okku000/dsh-ollama-quota#readme",
+  "bugs": {
+    "url": "https://github.com/okku000/dsh-ollama-quota/issues"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings-general"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node scripts/verify.mjs",
+    "verify": "node scripts/verify.mjs",
+    "verify:live": "node scripts/verify.mjs --live"
+  }
+}

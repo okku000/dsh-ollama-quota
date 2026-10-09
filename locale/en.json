@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Ollama Credit Balance",
+    "description": "Shows the remaining Ollama Cloud credit, the monthly allowance period, and recent spend and token usage in Settings, with an Ollama Cloud API key editor."
+  }
+}

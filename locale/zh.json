@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Ollama 余额",
+    "description": "在设置页显示 Ollama Cloud 剩余余额、每月可用额度、近期消费与 token 用量，并支持在页面内填写 API Key。"
+  }
+}
