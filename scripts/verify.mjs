@@ -611,9 +611,7 @@ const peakCursor = findElements(peakWideTree.tree, (node) => hasClass(node, 'oq-
 check(peakCursor.length === 1, 'strip carries the current-time cursor')
 check(Math.abs(Number.parseFloat(peakCursor[0].props.style.left) - (22.5 / 24 * 100)) < 1e-9, 'cursor sits at the local clock time')
 check(findElements(peakWideTree.tree, (node) => hasClass(node, 'oq-strip-ticks')).length === 1, 'strip carries the hour ticks')
-const peakMeter = findElements(peakWideTree.tree, (node) => hasClass(node, 'oq-meter-fill'))
-check(peakMeter.length >= 1, 'widget renders a period progress meter')
-check(peakMeter[0].props.style.width === '25%', 'peak meter fills the elapsed share of the 12:00-18:00 window')
+check(findElements(peakWideTree.tree, (node) => hasClass(node, 'oq-meter')).length === 0, 'widget carries no period progress meter')
 
 Date.now = () => Date.UTC(2026, 9, 10, 10, 0, 0) // Saturday 10:00 UTC
 const weekendTree = await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: true })
@@ -633,8 +631,7 @@ check(rail.includes('50:00'), 'collapsed rail shows a compact countdown')
 Date.now = () => Date.UTC(2026, 9, 7, 11, 30, 0) // Wednesday morning, before the peak
 const morningTree = await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: true })
 check(morningTree.text.includes('30分'), 'weekday morning counts down to the noon peak start')
-const morningMeter = findElements(morningTree.tree, (node) => hasClass(node, 'oq-meter-fill'))
-check(morningMeter.length >= 1 && morningMeter[0].props.style.width.indexOf('97.2') === 0, 'off-peak meter shows the stretch nearly elapsed')
+check(findElements(morningTree.tree, (node) => hasClass(node, 'oq-meter')).length === 0, 'no progress meter in any state')
 
 const sectionPeakTree = await renderComponent(registration.Component, loadedSnapshot, true)
 const sectionPeak = sectionPeakTree.text

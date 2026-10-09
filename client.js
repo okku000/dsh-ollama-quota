@@ -274,8 +274,6 @@ window.__ModuleLoader__.load({
 .oq-side-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .oq-side-dot { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; vertical-align: middle; }
 .oq-side-note { color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 13px; }
-.oq-meter { position: relative; height: 5px; border-radius: 3px; background: var(--dsw-alias-bg-layer-2); overflow: hidden; margin-top: 3px; }
-.oq-meter-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
 .oq-strip { margin-top: 4px; }
 .oq-strip-track { position: relative; height: 8px; border-radius: 4px; background: var(--dsw-alias-bg-layer-2); overflow: hidden; }
 .oq-strip-peak { position: absolute; top: 0; bottom: 0; background: var(--dsw-alias-state-warn-primary); opacity: .5; }
@@ -836,8 +834,6 @@ window.__ModuleLoader__.load({
       const now = Date.now()
       const period = offPeakState(now)
       const countdown = period.peak ? fmtCountdown(period.offPeakStart - now) : fmtCountdown(period.offPeakEnd - now)
-      const span = period.periodEnd !== null && period.periodStart !== null ? period.periodEnd - period.periodStart : 0
-      const elapsed = span > 0 ? Math.max(0, Math.min(1, (now - period.periodStart) / span)) : 1
       const status = period.peak ? t('peakActive') : t('offPeakActive')
       const boundary = (period.peak ? t('untilOffPeak') : t('untilPeak')) + ' ' + countdown
       if (props && props.wide === false) {
@@ -859,11 +855,6 @@ window.__ModuleLoader__.load({
             React.createElement('span', { className: 'oq-side-dot oq-' + (period.peak ? 'warn' : 'ok') }),
             status),
           React.createElement('span', { className: 'oq-mono' }, countdown)),
-        React.createElement('div', { className: 'oq-meter', title: (period.peak ? t('untilOffPeak') : t('untilPeak')) + ' ' + countdown },
-          React.createElement('div', {
-            className: 'oq-meter-fill oq-' + (period.peak ? 'warn' : 'ok'),
-            style: { width: (elapsed * 100) + '%' },
-          })),
         React.createElement(DayStrip, { key: 'strip' }))
     }
 
@@ -888,8 +879,6 @@ window.__ModuleLoader__.load({
       rows.push(React.createElement('div', { className: 'oq-row', key: 'end' },
         React.createElement('span', { className: 'oq-sub' }, t('untilPeak')),
         React.createElement('span', { className: 'oq-mono' }, fmtCountdown(period.offPeakEnd - now))))
-      const span = period.periodEnd !== null && period.periodStart !== null ? period.periodEnd - period.periodStart : 0
-      const elapsed = span > 0 ? Math.max(0, Math.min(1, (now - period.periodStart) / span)) : 1
       rows.push(React.createElement('div', { className: 'oq-divider', key: 'divider' }))
       rows.push(React.createElement('div', { className: 'oq-row', key: 'clock' },
         React.createElement('span', { className: 'oq-sub' }, t('nowClock')),
@@ -901,11 +890,6 @@ window.__ModuleLoader__.load({
         React.createElement('span', { className: 'oq-sub' }, t('dayStrip')),
         React.createElement('span', { className: 'oq-sub' }, '0 → 24 ' + localZoneLabel())))
       rows.push(React.createElement(DayStrip, { key: 'strip' }))
-      rows.push(React.createElement('div', { className: 'oq-meter', key: 'meter' },
-        React.createElement('div', {
-          className: 'oq-meter-fill oq-' + (period.peak ? 'warn' : 'ok'),
-          style: { width: (elapsed * 100) + '%' },
-        })))
       return React.createElement('div', { className: 'oq-card' }, rows)
     }
 
