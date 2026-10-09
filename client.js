@@ -27,6 +27,16 @@ window.__ModuleLoader__.load({
 
     const ja = {
       nav: 'Ollama 残高',
+      balanceShort: '残高',
+      usageShort: '30日利用',
+      offPeakCard: 'オフピーク時間帯',
+      offPeakActive: 'オフピーク中',
+      peakActive: 'ピーク中（割増）',
+      untilOffPeak: '開始まで',
+      untilPeak: '終了まで',
+      offPeakNow: '現在オフピーク',
+      offPeakRule: '平日 12:00–18:00 UTC の外側と、週末は終日オフピーク',
+      offPeakRuleShort: '平日12–18時UTC以外+週末終日',
       title: 'Ollama Cloud 残高',
       credit: 'インクルード残高',
       creditHint: '月次の利用可能枠',
@@ -77,6 +87,16 @@ window.__ModuleLoader__.load({
     }
     const en = {
       nav: 'Ollama credit',
+      balanceShort: 'Balance',
+      usageShort: '30-day usage',
+      offPeakCard: 'Off-peak window',
+      offPeakActive: 'Off-peak',
+      peakActive: 'Peak pricing',
+      untilOffPeak: 'Starts in',
+      untilPeak: 'Ends in',
+      offPeakNow: 'off-peak now',
+      offPeakRule: 'Off-peak outside 12:00–18:00 UTC on weekdays, and all day at weekends',
+      offPeakRuleShort: 'weekdays 12–18 UTC excluded + weekends',
       title: 'Ollama Cloud credit',
       credit: 'Included credit',
       creditHint: 'monthly allowance',
@@ -127,6 +147,16 @@ window.__ModuleLoader__.load({
     }
     const zh = {
       nav: 'Ollama 余额',
+      balanceShort: '余额',
+      usageShort: '30天用量',
+      offPeakCard: '低谷时段',
+      offPeakActive: '低谷价中',
+      peakActive: '高峰价中',
+      untilOffPeak: '距开始',
+      untilPeak: '距结束',
+      offPeakNow: '当前为低谷',
+      offPeakRule: '工作日 12:00–18:00 UTC 以外，以及整个周末均为低谷价',
+      offPeakRuleShort: '工作日12–18时UTC以外+周末',
       title: 'Ollama Cloud 余额',
       credit: '包含额度',
       creditHint: '每月可用额度',
@@ -228,11 +258,120 @@ window.__ModuleLoader__.load({
 .oq-input { box-sizing: border-box; flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: .5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-md, 6px); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-size: 13px; }
 .oq-input:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 1px; }
 .oq-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+.oq-side { display: flex; flex: 1 1 auto; flex-direction: column; gap: 3px; box-sizing: border-box; min-width: 0; width: 100%; padding: 8px 10px; border: .5px solid var(--dsw-alias-settings-card-stroke, var(--dsw-alias-border-l2)); border-radius: var(--dsw-radius-lg, 10px); background: var(--dsw-alias-settings-card-fill, var(--dsw-alias-bg-layer-1)); color: var(--dsw-alias-label-primary); font-size: 12px; line-height: 16px; }
+.oq-side-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.oq-side-balance { font-size: 14px; font-weight: 600; }
+.oq-side-sub { color: var(--dsw-alias-label-secondary); font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oq-side-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.oq-side-dot { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; vertical-align: middle; }
+.oq-side-note { color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 13px; }
+.oq-side-rail { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 0; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 13px; }
+.oq-side-rail .oq-side-balance { font-size: 11px; }
 `
       document.head.appendChild(tag)
     }
 
     const API = '/ollama-quota/snapshot'
+
+    /**
+     * Sidebar snapshot poll: one 60s fetch shared by the footer widget, plus a
+     * 1s clock tick that re-renders the off-peak countdowns.
+     */
+    const sidebarStore = {
+      status: 'loading',
+      data: null,
+      listeners: new Set(),
+      snapshotTimer: null,
+      clockTimer: null,
+      subscribe(listener) {
+        this.listeners.add(listener)
+        return () => { this.listeners.delete(listener) }
+      },
+      emit() {
+        for (const listener of [...this.listeners]) listener()
+      },
+      start() {
+        if (this.snapshotTimer !== null) return
+        this.load()
+        this.snapshotTimer = setInterval(() => { this.load() }, 60000)
+        this.clockTimer = setInterval(() => { this.emit() }, 1000)
+      },
+      stop() {
+        if (this.snapshotTimer !== null) clearInterval(this.snapshotTimer)
+        if (this.clockTimer !== null) clearInterval(this.clockTimer)
+        this.snapshotTimer = null
+        this.clockTimer = null
+      },
+      load() {
+        fetch(API, { cache: 'no-store' })
+          .then((response) => response.ok ? response.json() : Promise.reject(new Error('HTTP ' + response.status)))
+          .then((data) => { this.data = data; this.status = 'ready'; this.emit() })
+          .catch(() => { this.status = 'failed'; this.emit() })
+      },
+    }
+
+    /** First minute of the weekday peak window, in UTC minutes-of-day. */
+    const PEAK_START_MINUTE = 12 * 60
+
+    /** First minute after the weekday peak window, in UTC minutes-of-day. */
+    const PEAK_END_MINUTE = 18 * 60
+
+    /** Milliseconds in one day; UTC has no DST, so this is exact. */
+    const DAY_MS = 86400000
+
+    /**
+     * Resolve the next weekday 12:00 UTC strictly after one instant — the only
+     * way into peak pricing. Weekends are off-peak, so a Friday-evening,
+     * Saturday, or Sunday instant resolves to the following Monday.
+     * @param fromMs - epoch milliseconds to look forward from.
+     * @returns the peak start, or null when the search window is exhausted.
+     */
+    function nextPeakStart(fromMs) {
+      const from = new Date(fromMs)
+      let dayStart = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate())
+      for (let step = 0; step < 8; step++) {
+        const candidate = dayStart + PEAK_START_MINUTE * 60000
+        const weekday = new Date(candidate).getUTCDay()
+        if (weekday !== 0 && weekday !== 6 && candidate > fromMs) return candidate
+        dayStart += DAY_MS
+      }
+      return null
+    }
+
+    /**
+     * Project the current Ollama price period. Peak pricing runs on weekdays
+     * from 12:00 to 18:00 UTC; every other instant is off-peak.
+     * @param nowMs - epoch milliseconds.
+     * @returns peak flag plus the surrounding off-peak bounds (epoch ms).
+     */
+    function offPeakState(nowMs) {
+      const now = new Date(nowMs)
+      const weekday = now.getUTCDay() !== 0 && now.getUTCDay() !== 6
+      const minute = now.getUTCHours() * 60 + now.getUTCMinutes()
+      const peak = weekday && minute >= PEAK_START_MINUTE && minute < PEAK_END_MINUTE
+      if (peak) {
+        const offPeakStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+          + PEAK_END_MINUTE * 60000
+        return { peak: true, offPeakStart, offPeakEnd: nextPeakStart(offPeakStart) }
+      }
+      return { peak: false, offPeakStart: null, offPeakEnd: nextPeakStart(nowMs) }
+    }
+
+    /**
+     * Format one remaining duration.
+     * @param ms - milliseconds remaining.
+     * @returns `H時間MM分`, `M分SS秒`, or `S秒`.
+     */
+    function fmtCountdown(ms) {
+      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '0秒'
+      const total = Math.floor(ms / 1000)
+      const hours = Math.floor(total / 3600)
+      const minutes = Math.floor((total % 3600) / 60)
+      const seconds = total % 60
+      if (hours > 0) return hours + '時間' + String(minutes).padStart(2, '0') + '分'
+      if (minutes > 0) return minutes + '分' + String(seconds).padStart(2, '0') + '秒'
+      return seconds + '秒'
+    }
 
     /**
      * Format a dollar amount with two decimals.
@@ -524,6 +663,87 @@ window.__ModuleLoader__.load({
       return React.createElement('div', { className: 'oq-card' }, rows)
     }
 
+    /**
+     * Format one remaining duration for the collapsed rail.
+     * @param ms - milliseconds remaining.
+     * @returns `H:MM` or `M:SS`.
+     */
+    function fmtCompact(ms) {
+      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '0:00'
+      const total = Math.floor(ms / 1000)
+      const hours = Math.floor(total / 3600)
+      const minutes = Math.floor((total % 3600) / 60)
+      const seconds = total % 60
+      return hours > 0 ? hours + ':' + String(minutes).padStart(2, '0') : minutes + ':' + String(seconds).padStart(2, '0')
+    }
+
+    /**
+     * Sidebar-footer widget, always visible above Settings: the remaining
+     * credit, the recent spend, and the current price period with its
+     * countdown to the next boundary.
+     * @param props - owner props; `wide: false` renders the 56px rail form.
+     * @returns the widget element.
+     */
+    function SidebarQuota(props) {
+      const [, force] = React.useState(0)
+      React.useEffect(() => sidebarStore.subscribe(() => force((value) => value + 1)), [])
+      const data = sidebarStore.data
+      const balance = data && data.balance ? data.balance : null
+      const usage = data && data.usage ? data.usage : null
+      const remaining = balance ? usd(balance.includedUsd) : '—'
+      const spent = usage ? usd(usage.spentUsd) : '—'
+      const now = Date.now()
+      const period = offPeakState(now)
+      const countdown = period.peak ? fmtCountdown(period.offPeakStart - now) : fmtCountdown(period.offPeakEnd - now)
+      const status = period.peak ? t('peakActive') : t('offPeakActive')
+      const boundary = (period.peak ? t('untilOffPeak') : t('untilPeak')) + ' ' + countdown
+      if (props && props.wide === false) {
+        return React.createElement('div', { className: 'oq-side-rail', title: status + ' · ' + boundary + ' · ' + t('offPeakRuleShort') },
+          React.createElement('span', { className: 'oq-side-balance oq-mono' }, remaining),
+          React.createElement('span', { className: 'oq-mono' },
+            React.createElement('span', { className: 'oq-side-dot oq-' + (period.peak ? 'warn' : 'ok') }),
+            fmtCompact(period.peak ? period.offPeakStart - now : period.offPeakEnd - now)))
+      }
+      return React.createElement('div', { className: 'oq-side' },
+        React.createElement('div', { className: 'oq-side-head' },
+          React.createElement('span', { className: 'oq-side-sub' }, t('balanceShort')),
+          React.createElement('span', { className: 'oq-side-balance oq-mono' }, remaining)),
+        React.createElement('div', { className: 'oq-side-head' },
+          React.createElement('span', { className: 'oq-side-sub' }, t('usageShort')),
+          React.createElement('span', { className: 'oq-mono' }, spent)),
+        React.createElement('div', { className: 'oq-side-row' },
+          React.createElement('span', { className: 'oq-side-sub' },
+            React.createElement('span', { className: 'oq-side-dot oq-' + (period.peak ? 'warn' : 'ok') }),
+            status),
+          React.createElement('span', { className: 'oq-mono' }, countdown)),
+        React.createElement('div', { className: 'oq-side-note' },
+          (period.peak ? t('untilOffPeak') : t('untilPeak')) + ' · ' + t('offPeakRuleShort')))
+    }
+
+    /**
+     * Settings card for the price schedule: the rule plus both countdowns.
+     * @returns the card element.
+     */
+    function OffPeakCard() {
+      const now = Date.now()
+      const period = offPeakState(now)
+      const rows = []
+      rows.push(React.createElement('div', { className: 'oq-head', key: 'head' },
+        React.createElement('span', { className: 'oq-title' }, t('offPeakCard')),
+        React.createElement('span', { className: 'oq-sub' }, period.peak ? t('peakActive') : t('offPeakActive'))))
+      rows.push(React.createElement('div', { className: 'oq-row', key: 'rule' },
+        React.createElement('span', { className: 'oq-sub' }, t('offPeakRule'))))
+      rows.push(React.createElement('div', { className: 'oq-row', key: 'start' },
+        React.createElement('span', { className: 'oq-sub' }, t('untilOffPeak')),
+        React.createElement('span', { className: 'oq-mono' }, period.peak
+          ? fmtCountdown(period.offPeakStart - now)
+          : t('offPeakNow'))))
+      rows.push(React.createElement('div', { className: 'oq-row', key: 'end' },
+        React.createElement('span', { className: 'oq-sub' }, t('untilPeak')),
+        React.createElement('span', { className: 'oq-mono' }, fmtCountdown(period.offPeakEnd - now))))
+      return React.createElement('div', { className: 'oq-card' }, rows)
+    }
+
     /** The registered Settings section. */
     function OllamaQuotaSection() {
       const [state, setState] = React.useState({ status: 'loading', data: null })
@@ -533,6 +753,7 @@ window.__ModuleLoader__.load({
       const [keyBusy, setKeyBusy] = React.useState(false)
       const [keyError, setKeyError] = React.useState(null)
       const [keyMessage, setKeyMessage] = React.useState(null)
+      const [, setClock] = React.useState(0)
 
       const load = React.useCallback((force) => {
         if (force) setBusy(true)
@@ -576,6 +797,13 @@ window.__ModuleLoader__.load({
         const id = setInterval(() => load(false), 60000)
         return () => clearInterval(id)
       }, [load])
+
+      // The off-peak countdown ticks once a second; the snapshot itself stays
+      // on its own 60s cadence.
+      React.useEffect(() => {
+        const id = setInterval(() => setClock((value) => value + 1), 1000)
+        return () => clearInterval(id)
+      }, [])
 
       const data = state.data
       const refsKey = data && Array.isArray(data.keyEnvs) ? data.keyEnvs.join(',') : ''
@@ -664,6 +892,7 @@ window.__ModuleLoader__.load({
           error: data.usageError,
           detail: data.usageDetail,
         }))
+        children.push(React.createElement(OffPeakCard, { key: 'offpeak' }))
         if (data.keyEnv) {
           children.push(React.createElement('div', { className: 'oq-card', key: 'keysource' },
             React.createElement('div', { className: 'oq-row' },
@@ -716,6 +945,18 @@ window.__ModuleLoader__.load({
       // refuses the namespace property, and its methods are the current
       // positional form (describe(refs) / set(ref, value) / unset(ref)).
       credentials = ctx.remote.credentials
+      ctx.effect(() => {
+        sidebarStore.start()
+        return () => { sidebarStore.stop() }
+      }, 'ollama-quota: sidebar poller')
+      // The sidebar foot area stacks actions above the Settings entry, which is
+      // where the always-visible quota widget belongs.
+      slots.inject('sidebar.footer.action', () => slots.register({
+        name: 'sidebar.footer.action',
+        id: 'ollama-quota',
+        order: 10,
+        label: () => t('nav'),
+      }, SidebarQuota))
       slots.inject('settings.section', () => slots.register({
         name: 'settings.section',
         id: 'ollama-quota',

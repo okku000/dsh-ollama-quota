@@ -31,10 +31,27 @@ is re-read on its own slower interval (`usageRefreshMs`) because its wide window
 | Allowance period | `included.period.from` → `included.period.until` |
 | Spend, requests, input/cached/output tokens | `usage.totals` over `usageRange` |
 | Daily spend strip | `usage.buckets[].usage_usd` (max 31 buckets) |
+| Off-peak state and countdown | computed from the browser clock: peak pricing runs weekdays 12:00–18:00 UTC, everything else is off-peak |
 | Key source | which credential reference resolved |
 | API key editor | `remote.credentials.describe(refs)` / `set(ref, value)` / `unset(ref)` over the DSH Remote (`remote.credentials` is a declared inject edge) |
 
 Per-model request counts are not shown: the endpoint stopped reporting them.
+
+### Sidebar widget
+
+The plugin also registers `sidebar.footer.action`, the list slot that stacks above the shipped
+Settings entry. That widget is visible at all times, not only while Settings is open, and shows:
+
+- remaining credit and the 30-day spend,
+- whether off-peak pricing applies right now,
+- the countdown to the next boundary (off-peak start while peak, off-peak end while off-peak),
+- the schedule hint. The collapsed 56px rail keeps the credit and a compact `H:MM` countdown.
+
+Ollama applies off-peak pricing outside 12:00–18:00 UTC on weekdays and all day at weekends, so
+the peak window is the only interval whose end is a peak start.
+
+The Settings section carries the same state as an additional card with the full rule text and both
+countdowns.
 
 ## Install
 

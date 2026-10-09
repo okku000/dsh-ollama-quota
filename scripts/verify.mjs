@@ -365,16 +365,42 @@ check(typeof clientExports.apply === 'function', 'client half exports apply')
 check(Array.isArray(clientExports.inject) && clientExports.inject.includes('slots'), 'client half injects slots')
 check(Array.isArray(clientExports.inject) && clientExports.inject.includes('remote.credentials'), 'client half declares the remote.credentials inject edge')
 
-let registration
+const clientDisposers = []
+const registrations = {}
 const slots = {
   inject(name, callback) { callback() },
-  register(options, Component) { registration = { options, Component }; return () => undefined },
+  register(options, Component) { registrations[options.name] = { options, Component }; return () => undefined },
 }
-clientExports.apply({ get: (name) => (name === 'slots' ? slots : undefined), remote: { credentials: undefined } })
-check(registration !== undefined, 'client registers one slot contribution')
+/** Fake client context that records every effect disposer. */
+function clientCtx(extra = {}) {
+  return {
+    get: (name) => (name === 'slots' ? slots : undefined),
+    effect(callback) {
+      const dispose = callback()
+      if (typeof dispose === 'function') clientDisposers.push(dispose)
+      return () => undefined
+    },
+    ...extra,
+  }
+}
+// The sidebar poller fetches on activation, so its first load must see the stub.
+const originalFetchForApply = globalThis.fetch
+globalThis.fetch = loadedSnapshot
+try {
+  clientExports.apply(clientCtx({ remote: { credentials: undefined } }))
+} finally {
+  globalThis.fetch = originalFetchForApply
+}
+await settle()
+const registration = registrations['settings.section']
+check(registration !== undefined, 'client registers the settings.section contribution')
 check(registration.options.name === 'settings.section', 'contribution targets settings.section')
 check(registration.options.id === 'ollama-quota', 'contribution uses its own section id')
 check(registration.options.order === -9, 'section sits directly below the account entry (-10)')
+const sidebarRegistration = registrations['sidebar.footer.action']
+check(sidebarRegistration !== undefined, 'client registers a sidebar.footer.action widget')
+check(sidebarRegistration !== undefined && sidebarRegistration.options.id === 'ollama-quota', 'sidebar widget uses its own cell id')
+check(sidebarRegistration !== undefined && sidebarRegistration.options.order === 10, 'sidebar widget orders above the shipped footer entries')
 check(registration.options.label() === 'Ollama 残高', 'browser-language fallback projects the Japanese nav label')
 
 /** Collect host elements matching a predicate, expanding function components. */
@@ -400,7 +426,7 @@ function hasClass(node, token) {
  * @param reset - start from fresh hook state.
  * @returns the final element tree and its collected text.
  */
-async function renderComponent(Component, fetchImpl, reset = false) {
+async function renderComponent(Component, fetchImpl, reset = false, props = undefined) {
   if (reset) { state.hooks = []; state.dirty = false }
   const originalFetch = globalThis.fetch
   globalThis.fetch = fetchImpl
@@ -410,7 +436,7 @@ async function renderComponent(Component, fetchImpl, reset = false) {
     for (let tick = 0; tick < 60; tick++) {
       state.cursor = 0
       state.pending = []
-      tree = Component()
+      tree = Component(props)
       for (const effect of state.pending) effect()
       text = collectText(tree, []).join(' ')
       for (let flush = 0; flush < 6; flush++) await Promise.resolve()
@@ -507,7 +533,7 @@ const remoteFake = {
   },
 }
 let remoteRegistration
-clientExports.apply({
+clientExports.apply(clientCtx({
   get: (name) => {
     if (name === 'slots') {
       return {
@@ -515,10 +541,10 @@ clientExports.apply({
         register: (options, Component) => { remoteRegistration = { options, Component }; return () => undefined },
       }
     }
-    return name === 'remote' ? remoteFake : undefined
+    return undefined
   },
   remote: remoteFake,
-})
+}))
 
 const mounted = await renderComponent(remoteRegistration.Component, loadedSnapshot, true)
 check(mounted.text.includes('API キー'), 'key editor renders when the credentials Remote exists')
@@ -553,6 +579,34 @@ const readonly = await renderComponent(remoteRegistration.Component, loadedSnaps
 check(readonly.text.includes('読み取り専用'), 'read-only reference shows the environment warning')
 check(findElements(readonly.tree, (node) => hasClass(node, 'oq-input')).length === 0, 'read-only reference renders no input')
 
+// Off-peak pricing: weekdays 12:00-18:00 UTC are peak, everything else is off-peak.
+const realNow = Date.now
+Date.now = () => Date.UTC(2026, 9, 7, 13, 30, 0) // Wednesday 13:30 UTC
+const peakWide = (await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: true })).text
+check(peakWide.includes('$59.94'), 'sidebar widget shows the remaining credit')
+check(peakWide.includes('$1.23'), 'sidebar widget shows the 30-day spend')
+check(peakWide.includes('ピーク中'), 'weekday afternoon renders as peak pricing')
+check(peakWide.includes('4時間30分'), 'peak view counts down to the off-peak start (18:00 UTC)')
+check(peakWide.includes('平日12–18時UTC以外+週末終日'), 'sidebar widget carries the schedule hint')
+
+Date.now = () => Date.UTC(2026, 9, 10, 10, 0, 0) // Saturday 10:00 UTC
+const weekend = (await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: true })).text
+check(weekend.includes('オフピーク中'), 'weekend renders as off-peak')
+check(weekend.includes('50時間00分'), 'weekend counts down to Monday 12:00 UTC')
+
+const rail = (await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: false })).text
+check(rail.includes('$59.94'), 'collapsed rail keeps the credit visible')
+check(rail.includes('50:00'), 'collapsed rail shows a compact countdown')
+
+Date.now = () => Date.UTC(2026, 9, 7, 11, 30, 0) // Wednesday morning, before the peak
+const morning = (await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: true })).text
+check(morning.includes('30分00秒'), 'weekday morning counts down to the noon peak start')
+
+const sectionPeak = (await renderComponent(registration.Component, loadedSnapshot, true)).text
+check(sectionPeak.includes('オフピーク時間帯'), 'settings section carries the off-peak card')
+check(sectionPeak.includes('平日 12:00–18:00 UTC の外側と、週末は終日オフピーク'), 'settings card spells out the rule')
+Date.now = realNow
+
 // Locale service: dictionaries register and the nav label follows the active locale.
 const localeRegistrations = []
 let activeLocale = 'zh'
@@ -566,13 +620,12 @@ const localeFake = {
   },
 }
 let localeRegistration
-clientExports.apply({
+clientExports.apply(clientCtx({
   get: (name) => (name === 'slots'
     ? { inject: (slot, callback) => callback(), register: (options, Component) => { localeRegistration = { options, Component }; return () => undefined } }
     : name === 'locale' ? localeFake : undefined),
   remote: { credentials: undefined },
-  effect: (callback) => { callback(); return () => undefined },
-})
+}))
 check(localeRegistrations.length === 3, 'client registers Japanese, Chinese, and English dictionaries when the locale service exists')
 check(localeRegistrations.map((item) => item.id).sort().join(',') === 'en,ja,zh', 'every shipped locale is registered')
 check(localeRegistration.options.label() === 'Ollama 余额', 'nav label follows the active Chinese locale')
@@ -607,6 +660,8 @@ if (LIVE) {
     }
   }
 }
+
+for (const dispose of clientDisposers.splice(0).reverse()) dispose()
 
 // -------------------------------------------------------------------- report
 
