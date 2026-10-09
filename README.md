@@ -43,15 +43,20 @@ The plugin also registers `sidebar.footer.action`, the list slot that stacks abo
 Settings entry. That widget is visible at all times, not only while Settings is open, and shows:
 
 - remaining credit and the 30-day spend,
-- whether off-peak pricing applies right now,
-- the countdown to the next boundary (off-peak start while peak, off-peak end while off-peak),
-- the schedule hint. The collapsed 56px rail keeps the credit and a compact `H:MM` countdown.
+- whether off-peak pricing applies right now, with the current local time,
+- the countdown to the next boundary at minute granularity (off-peak start while peak, off-peak
+  end while off-peak),
+- a progress meter for the running period and a 24h strip on the **browser's local clock** with
+  the peak window charted onto it. JST turns 12:00–18:00 UTC into 21:00–03:00, so the band splits
+  across local midnight; the ticks are local hours and the strip caption is the local time.
+
+The collapsed 56px rail keeps the credit and a compact `H:MM` countdown.
 
 Ollama applies off-peak pricing outside 12:00–18:00 UTC on weekdays and all day at weekends, so
 the peak window is the only interval whose end is a peak start.
 
-The Settings section carries the same state as an additional card with the full rule text and both
-countdowns.
+The Settings section carries the same state as an additional card with the full rule text, the
+local peak window, the current local time, and both countdowns.
 
 ## Install
 

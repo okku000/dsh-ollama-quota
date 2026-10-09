@@ -37,6 +37,9 @@ window.__ModuleLoader__.load({
       offPeakNow: '現在オフピーク',
       offPeakRule: '平日 12:00–18:00 UTC の外側と、週末は終日オフピーク',
       offPeakRuleShort: '平日12–18時UTC以外+週末終日',
+      dayStrip: '本日の時間帯（塗り＝ピーク）',
+      localPeak: '現地時間のピーク時間帯',
+      nowClock: '現在時刻',
       title: 'Ollama Cloud 残高',
       credit: 'インクルード残高',
       creditHint: '月次の利用可能枠',
@@ -97,6 +100,9 @@ window.__ModuleLoader__.load({
       offPeakNow: 'off-peak now',
       offPeakRule: 'Off-peak outside 12:00–18:00 UTC on weekdays, and all day at weekends',
       offPeakRuleShort: 'weekdays 12–18 UTC excluded + weekends',
+      dayStrip: 'Today in local time (shaded = peak)',
+      localPeak: 'Peak window in local time',
+      nowClock: 'Local time',
       title: 'Ollama Cloud credit',
       credit: 'Included credit',
       creditHint: 'monthly allowance',
@@ -157,6 +163,9 @@ window.__ModuleLoader__.load({
       offPeakNow: '当前为低谷',
       offPeakRule: '工作日 12:00–18:00 UTC 以外，以及整个周末均为低谷价',
       offPeakRuleShort: '工作日12–18时UTC以外+周末',
+      dayStrip: '今日本地时间（填色为高峰）',
+      localPeak: '本地时间的高峰时段',
+      nowClock: '当前时间',
       title: 'Ollama Cloud 余额',
       credit: '包含额度',
       creditHint: '每月可用额度',
@@ -265,6 +274,13 @@ window.__ModuleLoader__.load({
 .oq-side-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .oq-side-dot { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; vertical-align: middle; }
 .oq-side-note { color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 13px; }
+.oq-meter { position: relative; height: 5px; border-radius: 3px; background: var(--dsw-alias-bg-layer-2); overflow: hidden; margin-top: 3px; }
+.oq-meter-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
+.oq-strip { margin-top: 4px; }
+.oq-strip-track { position: relative; height: 8px; border-radius: 4px; background: var(--dsw-alias-bg-layer-2); overflow: hidden; }
+.oq-strip-peak { position: absolute; top: 0; bottom: 0; background: var(--dsw-alias-state-warn-primary); opacity: .5; }
+.oq-strip-now { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--dsw-alias-label-primary); }
+.oq-strip-ticks { display: flex; justify-content: space-between; margin-top: 2px; color: var(--dsw-alias-label-secondary); font-size: 9px; line-height: 10px; }
 .oq-side-rail { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 0; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 13px; }
 .oq-side-rail .oq-side-balance { font-size: 11px; }
 `
@@ -275,7 +291,7 @@ window.__ModuleLoader__.load({
 
     /**
      * Sidebar snapshot poll: one 60s fetch shared by the footer widget, plus a
-     * 1s clock tick that re-renders the off-peak countdowns.
+     * 5s clock tick that re-renders the minute-granularity countdowns.
      */
     const sidebarStore = {
       status: 'loading',
@@ -294,7 +310,7 @@ window.__ModuleLoader__.load({
         if (this.snapshotTimer !== null) return
         this.load()
         this.snapshotTimer = setInterval(() => { this.load() }, 60000)
-        this.clockTimer = setInterval(() => { this.emit() }, 1000)
+        this.clockTimer = setInterval(() => { this.emit() }, 5000)
       },
       stop() {
         if (this.snapshotTimer !== null) clearInterval(this.snapshotTimer)
@@ -339,38 +355,93 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Resolve the last weekday 18:00 UTC at or before one instant — the moment
+     * the running off-peak stretch began. A Monday-morning, Saturday, or Sunday
+     * instant resolves to the preceding Friday.
+     * @param fromMs - epoch milliseconds to look back from.
+     * @returns the off-peak start, or null when the search window is exhausted.
+     */
+    function previousPeakEnd(fromMs) {
+      const from = new Date(fromMs)
+      let dayStart = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate())
+      for (let step = 0; step < 8; step++) {
+        const candidate = dayStart + PEAK_END_MINUTE * 60000
+        const weekday = new Date(candidate).getUTCDay()
+        if (weekday !== 0 && weekday !== 6 && candidate <= fromMs) return candidate
+        dayStart -= DAY_MS
+      }
+      return null
+    }
+
+    /**
      * Project the current Ollama price period. Peak pricing runs on weekdays
      * from 12:00 to 18:00 UTC; every other instant is off-peak.
      * @param nowMs - epoch milliseconds.
-     * @returns peak flag plus the surrounding off-peak bounds (epoch ms).
+     * @returns peak flag, the current period bounds, and the surrounding
+     *   off-peak bounds (epoch ms), which drive the bars and the countdowns.
      */
     function offPeakState(nowMs) {
       const now = new Date(nowMs)
       const weekday = now.getUTCDay() !== 0 && now.getUTCDay() !== 6
       const minute = now.getUTCHours() * 60 + now.getUTCMinutes()
       const peak = weekday && minute >= PEAK_START_MINUTE && minute < PEAK_END_MINUTE
+      const dayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
       if (peak) {
-        const offPeakStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-          + PEAK_END_MINUTE * 60000
-        return { peak: true, offPeakStart, offPeakEnd: nextPeakStart(offPeakStart) }
+        const peakStart = dayStart + PEAK_START_MINUTE * 60000
+        const peakEnd = dayStart + PEAK_END_MINUTE * 60000
+        return {
+          peak: true,
+          periodStart: peakStart,
+          periodEnd: peakEnd,
+          offPeakStart: peakEnd,
+          offPeakEnd: nextPeakStart(peakEnd),
+        }
       }
-      return { peak: false, offPeakStart: null, offPeakEnd: nextPeakStart(nowMs) }
+      const offPeakEnd = nextPeakStart(nowMs)
+      return {
+        peak: false,
+        periodStart: previousPeakEnd(nowMs),
+        periodEnd: offPeakEnd,
+        offPeakStart: null,
+        offPeakEnd,
+      }
     }
 
     /**
-     * Format one remaining duration.
+     * Format one remaining duration at minute granularity. Rounded up, so a
+     * running period never reads `0分` before its boundary passes.
      * @param ms - milliseconds remaining.
-     * @returns `H時間MM分`, `M分SS秒`, or `S秒`.
+     * @returns `H時間M分`, `H時間`, or `M分`.
      */
     function fmtCountdown(ms) {
-      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '0秒'
-      const total = Math.floor(ms / 1000)
-      const hours = Math.floor(total / 3600)
-      const minutes = Math.floor((total % 3600) / 60)
-      const seconds = total % 60
-      if (hours > 0) return hours + '時間' + String(minutes).padStart(2, '0') + '分'
-      if (minutes > 0) return minutes + '分' + String(seconds).padStart(2, '0') + '秒'
-      return seconds + '秒'
+      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '0分'
+      const minutes = Math.max(1, Math.ceil(ms / 60000))
+      const hours = Math.floor(minutes / 60)
+      const rest = minutes % 60
+      if (hours > 0) return rest === 0 ? hours + '時間' : hours + '時間' + rest + '分'
+      return minutes + '分'
+    }
+
+    /**
+     * Format one remaining duration for the collapsed rail, minutes only.
+     * @param ms - milliseconds remaining.
+     * @returns `H:MM` or `M分`.
+     */
+    function fmtCompact(ms) {
+      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '0分'
+      const minutes = Math.max(1, Math.ceil(ms / 60000))
+      const hours = Math.floor(minutes / 60)
+      return hours > 0 ? hours + ':' + String(minutes % 60).padStart(2, '0') : minutes + '分'
+    }
+
+    /**
+     * Format one instant as local wall-clock time.
+     * @param nowMs - epoch milliseconds.
+     * @returns `HH:MM` on the browser's clock.
+     */
+    function fmtClock(nowMs) {
+      const date = new Date(nowMs)
+      return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0')
     }
 
     /**
@@ -664,23 +735,93 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Format one remaining duration for the collapsed rail.
-     * @param ms - milliseconds remaining.
-     * @returns `H:MM` or `M:SS`.
+     * Peak intervals inside one local day, as fractions of that day. The rule
+     * is anchored in UTC, so a zone whose offset moves the window across local
+     * midnight (JST puts 12:00-18:00 UTC at 21:00-03:00) yields two bands.
+     * @param nowMs - instant whose local day is charted.
+     * @returns band fractions `{ left, width }` in [0, 1].
      */
-    function fmtCompact(ms) {
-      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '0:00'
-      const total = Math.floor(ms / 1000)
-      const hours = Math.floor(total / 3600)
-      const minutes = Math.floor((total % 3600) / 60)
-      const seconds = total % 60
-      return hours > 0 ? hours + ':' + String(minutes).padStart(2, '0') : minutes + ':' + String(seconds).padStart(2, '0')
+    function peakBands(nowMs) {
+      const now = new Date(nowMs)
+      const localStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+      const localEnd = localStart + DAY_MS
+      const bands = []
+      // Two UTC days can reach into one local day, so start one day early.
+      let dayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - DAY_MS
+      for (let step = 0; step < 3; step++) {
+        const weekday = new Date(dayStart).getUTCDay()
+        if (weekday !== 0 && weekday !== 6) {
+          const from = Math.max(dayStart + PEAK_START_MINUTE * 60000, localStart)
+          const until = Math.min(dayStart + PEAK_END_MINUTE * 60000, localEnd)
+          if (until > from) bands.push({ left: (from - localStart) / DAY_MS, width: (until - from) / DAY_MS })
+        }
+        dayStart += DAY_MS
+      }
+      return bands
+    }
+
+    /**
+     * This browser's zone abbreviation, for labeling the local-time axis.
+     * @returns the short zone name, or `local` when the runtime names none.
+     */
+    function localZoneLabel() {
+      try {
+        const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(new Date())
+        const found = parts.find((part) => part.type === 'timeZoneName')
+        return found && found.value ? found.value : 'local'
+      } catch {
+        return 'local'
+      }
+    }
+
+    /**
+     * The peak window in local wall-clock time. With a positive offset the end
+     * crosses local midnight, so it is reported modulo one day.
+     * @returns `HH:MM-HH:MM`.
+     */
+    function localPeakWindow() {
+      const offset = -new Date().getTimezoneOffset()
+      const clock = (minutes) => {
+        const wrapped = ((minutes % 1440) + 1440) % 1440
+        return String(Math.floor(wrapped / 60)).padStart(2, '0') + ':' + String(wrapped % 60).padStart(2, '0')
+      }
+      return clock(PEAK_START_MINUTE + offset) + '-' + clock(PEAK_END_MINUTE + offset)
+    }
+
+    /**
+     * One 24h strip on the browser's local clock: the peak bands mapped from
+     * the UTC rule, a cursor at the current local time, and hour ticks.
+     * @returns the strip element.
+     */
+    function DayStrip() {
+      const nowMs = Date.now()
+      const now = new Date(nowMs)
+      const localStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+      const cursor = ((nowMs - localStart) / DAY_MS) * 100
+      const zones = peakBands(nowMs).map((band, index) => React.createElement('div', {
+        className: 'oq-strip-peak',
+        key: 'band' + index,
+        style: { left: (band.left * 100) + '%', width: (band.width * 100) + '%' },
+      }))
+      const ticks = ['0', '6', '12', '18', '24'].map((hour) => React.createElement('span', { key: hour }, hour))
+      return React.createElement('div', { className: 'oq-strip' },
+        React.createElement('div', {
+          className: 'oq-strip-track',
+          title: t('offPeakRule') + ' · ' + localPeakWindow() + ' ' + localZoneLabel(),
+        }, zones.concat([React.createElement('div', {
+          className: 'oq-strip-now',
+          key: 'now',
+          style: { left: cursor + '%' },
+        })])),
+        React.createElement('div', { className: 'oq-strip-ticks' },
+          React.createElement('span', { key: 'clock' }, fmtClock(nowMs) + ' ' + localZoneLabel()),
+          ticks))
     }
 
     /**
      * Sidebar-footer widget, always visible above Settings: the remaining
-     * credit, the recent spend, and the current price period with its
-     * countdown to the next boundary.
+     * credit, the recent spend, and the current price period as bars — a
+     * progress meter for the running period plus the 24h UTC peak strip.
      * @param props - owner props; `wide: false` renders the 56px rail form.
      * @returns the widget element.
      */
@@ -695,6 +836,8 @@ window.__ModuleLoader__.load({
       const now = Date.now()
       const period = offPeakState(now)
       const countdown = period.peak ? fmtCountdown(period.offPeakStart - now) : fmtCountdown(period.offPeakEnd - now)
+      const span = period.periodEnd !== null && period.periodStart !== null ? period.periodEnd - period.periodStart : 0
+      const elapsed = span > 0 ? Math.max(0, Math.min(1, (now - period.periodStart) / span)) : 1
       const status = period.peak ? t('peakActive') : t('offPeakActive')
       const boundary = (period.peak ? t('untilOffPeak') : t('untilPeak')) + ' ' + countdown
       if (props && props.wide === false) {
@@ -716,8 +859,12 @@ window.__ModuleLoader__.load({
             React.createElement('span', { className: 'oq-side-dot oq-' + (period.peak ? 'warn' : 'ok') }),
             status),
           React.createElement('span', { className: 'oq-mono' }, countdown)),
-        React.createElement('div', { className: 'oq-side-note' },
-          (period.peak ? t('untilOffPeak') : t('untilPeak')) + ' · ' + t('offPeakRuleShort')))
+        React.createElement('div', { className: 'oq-meter', title: (period.peak ? t('untilOffPeak') : t('untilPeak')) + ' ' + countdown },
+          React.createElement('div', {
+            className: 'oq-meter-fill oq-' + (period.peak ? 'warn' : 'ok'),
+            style: { width: (elapsed * 100) + '%' },
+          })),
+        React.createElement(DayStrip, { key: 'strip' }))
     }
 
     /**
@@ -741,6 +888,24 @@ window.__ModuleLoader__.load({
       rows.push(React.createElement('div', { className: 'oq-row', key: 'end' },
         React.createElement('span', { className: 'oq-sub' }, t('untilPeak')),
         React.createElement('span', { className: 'oq-mono' }, fmtCountdown(period.offPeakEnd - now))))
+      const span = period.periodEnd !== null && period.periodStart !== null ? period.periodEnd - period.periodStart : 0
+      const elapsed = span > 0 ? Math.max(0, Math.min(1, (now - period.periodStart) / span)) : 1
+      rows.push(React.createElement('div', { className: 'oq-divider', key: 'divider' }))
+      rows.push(React.createElement('div', { className: 'oq-row', key: 'clock' },
+        React.createElement('span', { className: 'oq-sub' }, t('nowClock')),
+        React.createElement('span', { className: 'oq-sub oq-mono' }, fmtClock(now) + ' ' + localZoneLabel())))
+      rows.push(React.createElement('div', { className: 'oq-row', key: 'localpeak' },
+        React.createElement('span', { className: 'oq-sub' }, t('localPeak')),
+        React.createElement('span', { className: 'oq-sub oq-mono' }, localPeakWindow() + ' ' + localZoneLabel())))
+      rows.push(React.createElement('div', { className: 'oq-row', key: 'striplabel' },
+        React.createElement('span', { className: 'oq-sub' }, t('dayStrip')),
+        React.createElement('span', { className: 'oq-sub' }, '0 → 24 ' + localZoneLabel())))
+      rows.push(React.createElement(DayStrip, { key: 'strip' }))
+      rows.push(React.createElement('div', { className: 'oq-meter', key: 'meter' },
+        React.createElement('div', {
+          className: 'oq-meter-fill oq-' + (period.peak ? 'warn' : 'ok'),
+          style: { width: (elapsed * 100) + '%' },
+        })))
       return React.createElement('div', { className: 'oq-card' }, rows)
     }
 
@@ -798,10 +963,10 @@ window.__ModuleLoader__.load({
         return () => clearInterval(id)
       }, [load])
 
-      // The off-peak countdown ticks once a second; the snapshot itself stays
-      // on its own 60s cadence.
+      // The clock and the minute countdowns tick every 5s; the snapshot itself
+      // stays on its own 60s cadence.
       React.useEffect(() => {
-        const id = setInterval(() => setClock((value) => value + 1), 1000)
+        const id = setInterval(() => setClock((value) => value + 1), 5000)
         return () => clearInterval(id)
       }, [])
 

@@ -16,6 +16,10 @@
  * projections are asserted against the endpoints Ollama answers right now.
  */
 
+// The strip is charted on the browser's local clock; pin the deployment zone
+// (JST, UTC+9) so the band geometry below is deterministic.
+process.env.TZ = 'Asia/Tokyo'
+
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -582,28 +586,62 @@ check(findElements(readonly.tree, (node) => hasClass(node, 'oq-input')).length =
 // Off-peak pricing: weekdays 12:00-18:00 UTC are peak, everything else is off-peak.
 const realNow = Date.now
 Date.now = () => Date.UTC(2026, 9, 7, 13, 30, 0) // Wednesday 13:30 UTC
-const peakWide = (await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: true })).text
+const peakWideTree = await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: true })
+const peakWide = peakWideTree.text
 check(peakWide.includes('$59.94'), 'sidebar widget shows the remaining credit')
 check(peakWide.includes('$1.23'), 'sidebar widget shows the 30-day spend')
 check(peakWide.includes('ピーク中'), 'weekday afternoon renders as peak pricing')
 check(peakWide.includes('4時間30分'), 'peak view counts down to the off-peak start (18:00 UTC)')
-check(peakWide.includes('平日12–18時UTC以外+週末終日'), 'sidebar widget carries the schedule hint')
+check(peakWide.includes('22:30'), 'widget shows the current local time')
+check(!/[0-9]+秒/.test(peakWide), 'countdowns stay at minute granularity')
+// The zone abbreviation is locale-dependent ('JST' under ja-JP, 'GMT+9' under
+// en-US), so compare against whatever this runtime itself produces.
+const zonePart = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
+  .formatToParts(new Date()).find((part) => part.type === 'timeZoneName')
+check(zonePart !== undefined && peakWide.includes(zonePart.value), 'strip axis is labelled with the local zone')
+const peakBand = findElements(peakWideTree.tree, (node) => hasClass(node, 'oq-strip-peak'))
+// JST puts 12:00-18:00 UTC at 21:00-03:00, so the local day carries two bands:
+// the tail of the previous UTC day and the evening of this one.
+check(peakBand.length === 2, 'JST weekday strip splits the peak window across local midnight')
+check(Math.abs(Number.parseFloat(peakBand[0].props.style.left) - 0) < 1e-9, 'first JST band opens at local midnight')
+check(Math.abs(Number.parseFloat(peakBand[0].props.style.width) - (3 / 24 * 100)) < 1e-9, 'first JST band covers 00:00-03:00 local')
+check(Math.abs(Number.parseFloat(peakBand[1].props.style.left) - (21 / 24 * 100)) < 1e-9, 'second JST band opens at 21:00 local')
+check(Math.abs(Number.parseFloat(peakBand[1].props.style.width) - (3 / 24 * 100)) < 1e-9, 'second JST band covers 21:00-24:00 local')
+const peakCursor = findElements(peakWideTree.tree, (node) => hasClass(node, 'oq-strip-now'))
+check(peakCursor.length === 1, 'strip carries the current-time cursor')
+check(Math.abs(Number.parseFloat(peakCursor[0].props.style.left) - (22.5 / 24 * 100)) < 1e-9, 'cursor sits at the local clock time')
+check(findElements(peakWideTree.tree, (node) => hasClass(node, 'oq-strip-ticks')).length === 1, 'strip carries the hour ticks')
+const peakMeter = findElements(peakWideTree.tree, (node) => hasClass(node, 'oq-meter-fill'))
+check(peakMeter.length >= 1, 'widget renders a period progress meter')
+check(peakMeter[0].props.style.width === '25%', 'peak meter fills the elapsed share of the 12:00-18:00 window')
 
 Date.now = () => Date.UTC(2026, 9, 10, 10, 0, 0) // Saturday 10:00 UTC
-const weekend = (await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: true })).text
+const weekendTree = await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: true })
+const weekend = weekendTree.text
 check(weekend.includes('オフピーク中'), 'weekend renders as off-peak')
-check(weekend.includes('50時間00分'), 'weekend counts down to Monday 12:00 UTC')
+check(weekend.includes('50時間'), 'weekend counts down to Monday 12:00 UTC')
+const weekendBand = findElements(weekendTree.tree, (node) => hasClass(node, 'oq-strip-peak'))
+// Local Saturday 19:00: the 21:00-24:00 JST stretch falls on a UTC weekend, so
+// only the 00:00-03:00 JST tail of the previous UTC Friday peaks.
+check(weekendBand.length === 1, 'JST weekend strip keeps only the early-morning peak band')
+check(Math.abs(Number.parseFloat(weekendBand[0].props.style.width) - (3 / 24 * 100)) < 1e-9, 'weekend band covers 00:00-03:00 local')
 
 const rail = (await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: false })).text
 check(rail.includes('$59.94'), 'collapsed rail keeps the credit visible')
 check(rail.includes('50:00'), 'collapsed rail shows a compact countdown')
 
 Date.now = () => Date.UTC(2026, 9, 7, 11, 30, 0) // Wednesday morning, before the peak
-const morning = (await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: true })).text
-check(morning.includes('30分00秒'), 'weekday morning counts down to the noon peak start')
+const morningTree = await renderComponent(sidebarRegistration.Component, loadedSnapshot, true, { wide: true })
+check(morningTree.text.includes('30分'), 'weekday morning counts down to the noon peak start')
+const morningMeter = findElements(morningTree.tree, (node) => hasClass(node, 'oq-meter-fill'))
+check(morningMeter.length >= 1 && morningMeter[0].props.style.width.indexOf('97.2') === 0, 'off-peak meter shows the stretch nearly elapsed')
 
-const sectionPeak = (await renderComponent(registration.Component, loadedSnapshot, true)).text
+const sectionPeakTree = await renderComponent(registration.Component, loadedSnapshot, true)
+const sectionPeak = sectionPeakTree.text
 check(sectionPeak.includes('オフピーク時間帯'), 'settings section carries the off-peak card')
+check(sectionPeak.includes('21:00-03:00'), 'settings card states the peak window in local time')
+check(sectionPeak.includes('現在時刻') && sectionPeak.includes('20:30'), 'settings card shows the current local time')
+check(findElements(sectionPeakTree.tree, (node) => hasClass(node, 'oq-strip-peak')).length === 2, 'settings card carries the local peak strip')
 check(sectionPeak.includes('平日 12:00–18:00 UTC の外側と、週末は終日オフピーク'), 'settings card spells out the rule')
 Date.now = realNow
 
